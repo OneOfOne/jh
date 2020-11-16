@@ -7,8 +7,8 @@ import (
 )
 
 type (
-	Array  = []*Value
-	Object = map[string]*Value
+	Array  = []Value
+	Object = map[string]Value
 )
 
 const (
@@ -52,15 +52,18 @@ type Value struct {
 	v json.RawMessage
 }
 
-func (v *Value) Kind() Kind {
+func (v Value) Kind() Kind {
 	if len(v.v) == 0 {
 		return NullKind
 	}
-	switch v.v[0] {
+	b := v.v[0]
+	if b >= '0' && b <= '9' {
+		return NumberKind
+	}
+
+	switch b {
 	case 't', 'T', 'f', 'F':
 		return BoolKind
-	case '0', '1', '2', '3', '4', '5', '6', '7', '8', '9':
-		return NumberKind
 	case '"':
 		return StringKind
 	case '[':
@@ -74,7 +77,15 @@ func (v *Value) Kind() Kind {
 	}
 }
 
-func (v *Value) String() string {
+func isn(b byte) bool {
+	return b >= '0' && b <= '9'
+}
+
+func (v Value) IsNull() bool {
+	return v.Kind() == NullKind
+}
+
+func (v Value) String() string {
 	vv := v.v
 	if len(vv) == 0 {
 		return ""
@@ -85,7 +96,12 @@ func (v *Value) String() string {
 	return string(vv)
 }
 
-func (v *Value) Int(base int) int64 {
+func (v Value) Bool() bool {
+	b, _ := strconv.ParseBool(v.String())
+	return b
+}
+
+func (v Value) Int(base int) int64 {
 	if base == 0 {
 		base = 10
 	}
@@ -93,7 +109,7 @@ func (v *Value) Int(base int) int64 {
 	return n
 }
 
-func (v *Value) Uint(base int) uint64 {
+func (v Value) Uint(base int) uint64 {
 	if base == 0 {
 		base = 10
 	}
@@ -101,18 +117,18 @@ func (v *Value) Uint(base int) uint64 {
 	return n
 }
 
-func (v *Value) Float() float64 {
+func (v Value) Float() float64 {
 	n, _ := strconv.ParseFloat(v.String(), 64)
 	return n
 }
 
-func (v *Value) Array() []*Value {
+func (v Value) Array() []*Value {
 	var out []*Value
 	v.As(&out)
 	return out
 }
 
-func (v *Value) Object() map[string]*Value {
+func (v Value) Object() map[string]*Value {
 	var out map[string]*Value
 	v.As(&out)
 	return out
@@ -120,7 +136,7 @@ func (v *Value) Object() map[string]*Value {
 
 // AsTime will try to return the time representation of the value, using the given fmts or DefaultDateTimeLayouts.
 // if the value is a number it'll check if it's in NS, MS or a normal *U*nix timestamp and return that.
-func (v *Value) AsTime(fmts ...string) (fmt string, t time.Time, ok bool) {
+func (v Value) AsTime(fmts ...string) (fmt string, t time.Time, err error) {
 	if len(fmts) == 0 {
 		fmts = DefaultDateTimeLayouts[:]
 	}
@@ -128,24 +144,32 @@ func (v *Value) AsTime(fmts ...string) (fmt string, t time.Time, ok bool) {
 		n := v.Int(10)
 		switch {
 		case n >= minNS:
-			return "NS", time.Unix(0, n), true
+			return "NS", time.Unix(0, n), nil
 		case n >= minNS:
-			return "MS", time.Unix(n/1000, 0), true
+			return "MS", time.Unix(n/1000, 0), nil
 		default:
-			return "U", time.Unix(n, 0), true
+			return "U", time.Unix(n, 0), nil
 		}
 	}
 
 	sv := v.String()
-	for _, f := range fmts {
-		if t, err := time.Parse(f, sv); err != nil {
-			return f, t, true
+	for _, fmt = range fmts {
+		if t, err = time.Parse(fmt, sv); err == nil {
+			return
 		}
 	}
 
 	return
 }
 
-func (v *Value) As(ptr interface{}) error {
+func (v Value) As(ptr interface{}) error {
 	return json.Unmarshal(v.v, ptr)
+}
+
+func (v Value) MarshalJSON() ([]byte, error) {
+	return v.v.MarshalJSON()
+}
+
+func (v *Value) UnmarshalJSON(p []byte) error {
+	return v.v.UnmarshalJSON(p)
 }
